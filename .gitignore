@@ -3,14 +3,24 @@
 __pycache__/
 *.pyc
 
-# Unity
-[Ll]ibrary/
-[Tt]emp/
-[Oo]bj/
-[Bb]uild/
-[Bb]uilds/
-[Ll]ogs/
-[Uu]ser[Ss]ettings/
+# ==========================================
+# Unity official exclusions
+# ==========================================
+[Log]s/
+[T]emp/
+[O]bj/
+[B]uild/
+[B]uilds/
+[U]ser[S]ettings/
+
+# Explicitly ignore the root Library folder, but NEVER its meta file
+/[L]ibrary/
+
+# Crash dumps and memory profiling
+*.idb
+*.pdb
+*.pidb
+*.log
 
 # IDE
 .vs/
