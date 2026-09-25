@@ -1,6 +1,6 @@
 import json
 
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, HTTPException
 
 from emotion_agent.emotion import analyze_emotion
 
@@ -8,6 +8,10 @@ import httpx
 from pydantic import BaseModel
 
 import re
+
+from auth import hash_password
+
+from db import get_connection
 
 EMOJI_PATTERN = re.compile(
     "["
@@ -48,6 +52,61 @@ def root():
 class ChatRequest(BaseModel):
     message: str
 
+class RegisterRequest(BaseModel):
+    username: str
+    email: str
+    password: str
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+@app.post("/auth/register")
+@app.post("/auth/register")
+def register(request: RegisterRequest):
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+
+            cursor.execute(
+                """
+                SELECT id
+                FROM users
+                WHERE email = %s OR username = %s
+                """,
+                (request.email, request.username)
+            )
+
+            existing_user = cursor.fetchone()
+
+            if existing_user:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Пользователь с таким email или username уже существует"
+            )
+
+            password_hash = hash_password(request.password)
+
+            cursor.execute(
+                """
+                INSERT INTO users (username, email, password_hash)
+                VALUES (%s, %s, %s)
+                RETURNING id, username, email
+                """,
+                (
+                    request.username,
+                    request.email,
+                    password_hash
+                )
+            )
+
+            user = cursor.fetchone()
+
+    return {
+        "id": user[0],
+        "username": user[1],
+        "email": user[2]
+    }
 
 OLLAMA_GENERATE_URL = "http://localhost:11434/api/generate"
 CHAT_MODEL_NAME = "qwen3:8b"
@@ -168,3 +227,12 @@ async def chat_websocket(websocket: WebSocket):
 
     except Exception as e:
         print("Chat WebSocket disconnected:", repr(e))
+
+@app.get("/db-test")
+def db_test():
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            result = cursor.fetchone()
+
+    return {"database": result[0]}
