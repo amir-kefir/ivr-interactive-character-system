@@ -13,8 +13,8 @@ __pycache__/
 [B]uilds/
 [U]ser[S]ettings/
 
-# Explicitly ignore the root Library folder, but NEVER its meta file
-/[L]ibrary/
+# Unity Library folder (generated cache)
+/[Ll]ibrary/
 
 # Crash dumps and memory profiling
 *.idb
