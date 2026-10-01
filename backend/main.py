@@ -1,6 +1,6 @@
 import json
 
-from fastapi import FastAPI, WebSocket, HTTPException
+from fastapi import FastAPI, WebSocket, HTTPException, WebSocketDisconnect
 
 from emotion_agent.emotion import analyze_emotion
 
@@ -204,7 +204,6 @@ def login(request: LoginRequest):
 OLLAMA_GENERATE_URL = "http://localhost:11434/api/generate"
 CHAT_MODEL_NAME = "qwen3:8b"
 
-
 @app.post("/chat")
 async def chat(request: ChatRequest):
     payload = {
@@ -222,70 +221,36 @@ async def chat(request: ChatRequest):
     return {"response": data.get("response", "")}
 
 @app.websocket("/ws/emotion")
-async def emotion_websocket(
-    websocket: WebSocket
-):
-
+async def emotion_websocket(websocket: WebSocket):
     await websocket.accept()
-
-    print(
-        "Emotion WebSocket connected"
-    )
+    print("Emotion WebSocket connected")
 
     try:
-
         while True:
-
             message = await websocket.receive_text()
-
-            print(
-                "Received:",
-                message
-            )
+            print("Received:", message)
 
             try:
-
-                result = await analyze_emotion(
-                    message
-                )
+                result = await analyze_emotion(message)
 
                 print(
                     "Emotion result:",
-                    json.dumps(
-                        result,
-                        ensure_ascii=False
-                    )
+                    json.dumps(result, ensure_ascii=False)
                 )
 
                 await websocket.send_text(
-                    json.dumps(
-                        result,
-                        ensure_ascii=False
-                    )
+                    json.dumps(result, ensure_ascii=False)
                 )
+
+            except WebSocketDisconnect:
+                print("Emotion WebSocket disconnected")
+                break
 
             except Exception as e:
+                print("Emotion Agent error:", repr(e))
 
-                print(
-                    "Emotion Agent error:",
-                    repr(e)
-                )
-
-                await websocket.send_text(
-                    json.dumps(
-                        {
-                            "error": str(e)
-                        },
-                        ensure_ascii=False
-                    )
-                )
-
-    except Exception as e:
-
-        print(
-            "WebSocket disconnected:",
-            repr(e)
-        )
+    except WebSocketDisconnect:
+        print("Emotion WebSocket disconnected")
 
 @app.websocket("/ws/chat")
 async def chat_websocket(websocket: WebSocket):
@@ -303,23 +268,46 @@ async def chat_websocket(websocket: WebSocket):
                 "stream": True,
             }
 
-            async with httpx.AsyncClient(trust_env=False, timeout=None) as client:
-                async with client.stream("POST", OLLAMA_GENERATE_URL, json=payload) as response:
+            async with httpx.AsyncClient(
+                trust_env=False,
+                timeout=None
+            ) as client:
+
+                async with client.stream(
+                    "POST",
+                    OLLAMA_GENERATE_URL,
+                    json=payload
+                ) as response:
+
                     async for line in response.aiter_lines():
                         if not line:
                             continue
+
                         data = json.loads(line)
-                        chunk = strip_emoji(data.get("response", ""))
+
+                        chunk = strip_emoji(
+                            data.get("response", "")
+                        )
+
                         if chunk:
                             await websocket.send_text(
-                                json.dumps({"chunk": chunk}, ensure_ascii=False)
+                                json.dumps(
+                                    {"chunk": chunk},
+                                    ensure_ascii=False
+                                )
                             )
+
                         if data.get("done"):
-                            await websocket.send_text(json.dumps({"done": True}))
+                            await websocket.send_text(
+                                json.dumps({"done": True})
+                            )
                             break
 
+    except WebSocketDisconnect:
+        print("Chat WebSocket disconnected")
+
     except Exception as e:
-        print("Chat WebSocket disconnected:", repr(e))
+        print("Chat WebSocket error:", repr(e))
 
 @app.get("/db-test")
 def db_test():
