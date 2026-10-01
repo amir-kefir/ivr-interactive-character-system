@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 import re
 
-from auth import hash_password
+from auth import hash_password, verify_password
 
 from db import get_connection
 
@@ -61,31 +61,81 @@ class LoginRequest(BaseModel):
     email: str
     password: str
 
-@app.post("/auth/register")
+
+USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_]{3,30}$")
+EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
 @app.post("/auth/register")
 def register(request: RegisterRequest):
+    username = request.username.strip()
+    email = request.email.strip().lower()
+    password = request.password
+
+    # Проверка username
+    if not USERNAME_PATTERN.fullmatch(username):
+        raise HTTPException(
+            status_code=400,
+            detail="INVALID_USERNAME"
+        )
+
+    # Проверка email
+    if not EMAIL_PATTERN.fullmatch(email):
+        raise HTTPException(
+            status_code=400,
+            detail="INVALID_EMAIL"
+        )
+
+    # Проверка пароля
+    if len(password) < 8:
+        raise HTTPException(
+            status_code=400,
+            detail="PASSWORD_TOO_SHORT"
+        )
 
     with get_connection() as connection:
         with connection.cursor() as cursor:
 
             cursor.execute(
                 """
-                SELECT id
+                SELECT 1
                 FROM users
-                WHERE email = %s OR username = %s
+                WHERE username = %s
                 """,
-                (request.email, request.username)
+                (username,)
             )
 
-            existing_user = cursor.fetchone()
+            username_exists = cursor.fetchone() is not None
 
-            if existing_user:
+            cursor.execute(
+                """
+                SELECT 1
+                FROM users
+                WHERE LOWER(email) = %s
+                """,
+                (email,)
+            )
+
+            email_exists = cursor.fetchone() is not None
+
+            if username_exists and email_exists:
                 raise HTTPException(
                     status_code=400,
-                    detail="Пользователь с таким email или username уже существует"
-            )
+                    detail="USERNAME_AND_EMAIL_TAKEN"
+                )
 
-            password_hash = hash_password(request.password)
+            if username_exists:
+                raise HTTPException(
+                    status_code=400,
+                    detail="USERNAME_TAKEN"
+                )
+
+            if email_exists:
+                raise HTTPException(
+                    status_code=400,
+                    detail="EMAIL_TAKEN"
+                )
+
+            password_hash = hash_password(password)
 
             cursor.execute(
                 """
@@ -94,8 +144,8 @@ def register(request: RegisterRequest):
                 RETURNING id, username, email
                 """,
                 (
-                    request.username,
-                    request.email,
+                    username,
+                    email,
                     password_hash
                 )
             )
@@ -106,6 +156,49 @@ def register(request: RegisterRequest):
         "id": user[0],
         "username": user[1],
         "email": user[2]
+    }
+
+@app.post("/auth/login")
+def login(request: LoginRequest):
+
+    email = request.email.strip().lower()
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+
+            cursor.execute(
+                """
+                SELECT id, username, email, password_hash
+                FROM users
+                WHERE email = %s
+                """,
+                (email,)
+            )
+
+            user = cursor.fetchone()
+
+            if user is None:
+                raise HTTPException(
+                    status_code=401,
+                    detail="INVALID_LOGIN"
+                )
+
+            password_ok = verify_password(
+                request.password,
+                user[3]
+            )
+
+            if not password_ok:
+                raise HTTPException(
+                    status_code=401,
+                    detail="INVALID_LOGIN"
+                )
+
+    return {
+        "id": user[0],
+        "username": user[1],
+        "email": user[2],
+        "message": "Успешный вход"
     }
 
 OLLAMA_GENERATE_URL = "http://localhost:11434/api/generate"
